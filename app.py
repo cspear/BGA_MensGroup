@@ -1,55 +1,68 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIG ---
+# --- 1. CONNECTION TO YOUR SHEET ---
+# This looks for the 'Secret' URL you put in the Streamlit dashboard
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# --- 2. CONFIG & STYLING ---
 HOLE_PARS = {1:4, 2:3, 3:5, 4:4, 5:3, 6:4, 7:4, 8:4, 9:4}
 
-# --- CUSTOM CSS FOR GIANT BUTTONS ---
 st.markdown("""
     <style>
-    /* Make the number input buttons huge */
-    button[step="1"] { width: 60px !important; height: 60px !important; }
-    /* Centering and sizing the hole labels */
-    .hole-label { font-size: 22px; font-weight: bold; margin-bottom: -10px; }
-    /* Team Header */
-    .team-header { background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #007bff; margin-bottom: 20px; }
+    /* Make the +/- buttons and number box much larger for older eyes */
+    .stNumberInput div div input { font-size: 30px !important; height: 60px !important; }
+    button { height: 3em !important; }
+    .hole-label { font-size: 24px; font-weight: bold; margin-top: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
+# --- 3. LOGIN LOGIC ---
 if 'auth' not in st.session_state:
-    st.title("⛳ Golf Login")
-    pin = st.text_input("Enter Team PIN", type="password")
-    if st.button("Access Scorecard"):
-        # Logic to pull names from your 'Setup' tab goes here
-        st.session_state.auth = pin
-        st.session_state.names = "John, Bill, & Dave" # Replace with sheet lookup
-        st.session_state.start_hole = 4 # Replace with sheet lookup
-        st.rerun()
-else:
-    # --- TEAM HEADER ---
-    st.markdown(f"""
-        <div class="team-header">
-            <h2 style='margin:0;'>Team: {st.session_state.names}</h2>
-            <p style='margin:0; font-size: 18px;'>Starting on <b>Hole {st.session_state.start_hole}</b></p>
-        </div>
-        """, unsafe_allow_html=True)
+    st.title("⛳ Tournament Login")
+    pin_input = st.text_input("Enter your Team PIN", type="password")
+    
+    if st.button("Start Scoring"):
+        # Fetch your 'Setup' tab
+        df_setup = conn.read(worksheet="Setup")
+        
+        # Look for the PIN in your spreadsheet (ensuring it's treated as a string)
+        match = df_setup[df_setup['PIN'].astype(str) == pin_input]
+        
+        if not match.empty:
+            # PULL ACTUAL NAMES FROM YOUR SHEET
+            # Assuming columns are: P1, P2, P3
+            p1 = match['P1'].iloc[0]
+            p2 = match['P2'].iloc[0]
+            p3 = match['P3'].iloc[0] if 'P3' in match.columns else ""
+            
+            st.session_state.auth = pin_input
+            st.session_state.team_id = match['Team_ID'].iloc[0]
+            st.session_state.names = f"{p1}, {p2} {('& ' + p3) if p3 else ''}"
+            st.session_state.start_hole = match['Start_Hole'].iloc[0]
+            st.rerun()
+        else:
+            st.error("PIN not found. Please see the Admin.")
 
-    # --- BIG SCORECARD ---
+# --- 4. THE ACTUAL APP ---
+else:
+    st.header(f"Team: {st.session_state.names}")
+    st.subheader(f"Starting Hole: {st.session_state.start_hole}")
+    
     scores = {}
     for i in range(1, 10):
-        # We wrap each hole in a container to give it space
-        with st.container():
-            st.markdown(f"<div class='hole-label'>Hole {i} (Par {HOLE_PARS[i]})</div>", unsafe_allow_html=True)
-            # 'label_visibility' hidden keeps it clean but accessible
-            scores[i] = st.number_input(f"H{i}", min_value=1, max_value=10, value=HOLE_PARS[i], key=f"h{i}", label_visibility="collapsed")
-            st.divider()
+        st.markdown(f"<div class='hole-label'>Hole {i} (Par {HOLE_PARS[i]})</div>", unsafe_allow_html=True)
+        scores[i] = st.number_input(f"Score for Hole {i}", min_value=1, max_value=10, value=HOLE_PARS[i], key=f"h{i}", label_visibility="collapsed")
 
-    # --- FOOTER ---
+    # Calculate Totals
     total = sum(scores.values())
     par_total = sum(HOLE_PARS.values())
-    diff = total - par_total
+    relative_score = total - par_total
     
-    st.markdown(f"### Total Score: {total} ({diff:+ if diff != 0 else 'E'})")
-    
-    if st.button("SUBMIT FINAL SCORE"):
+    st.divider()
+    st.markdown(f"## Total: {total} ({relative_score:+ if relative_score != 0 else 'E'})")
+
+    if st.button("FINISH & SUBMIT"):
+        # Here we would add the conn.update logic to save to the 'Scores' tab
         st.balloons()
-        st.success("Scores Saved! You can close this page.")
+        st.success("Scores saved! Great round.")
