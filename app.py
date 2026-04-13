@@ -1,52 +1,55 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime
 
-# --- CONFIGURATION ---
+# --- CONFIG ---
 HOLE_PARS = {1:4, 2:3, 3:5, 4:4, 5:3, 6:4, 7:4, 8:4, 9:4}
-# Tie-breaker priority based on your difficulty input (1 is hardest)
-TIE_BREAKER_ORDER = [1, 8, 5, 7, 6, 9, 2, 3, 4] 
 
-st.set_page_config(page_title="Golf Scramble", layout="centered")
-
-# --- UI STYLING ---
+# --- CUSTOM CSS FOR GIANT BUTTONS ---
 st.markdown("""
     <style>
-    .stButton>button { width: 100%; height: 3em; font-size: 20px; font-weight: bold; }
-    .score-box { font-size: 24px; font-weight: bold; color: #007bff; }
+    /* Make the number input buttons huge */
+    button[step="1"] { width: 60px !important; height: 60px !important; }
+    /* Centering and sizing the hole labels */
+    .hole-label { font-size: 22px; font-weight: bold; margin-bottom: -10px; }
+    /* Team Header */
+    .team-header { background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #007bff; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- LOGIN SCREEN ---
 if 'auth' not in st.session_state:
-    st.title("⛳ Weekly Scramble")
-    pin_input = st.text_input("Enter Team PIN", type="password")
-    if st.button("Login"):
-        # Replace this with your Google Sheet lookup logic later
-        # For now, testing logic:
-        if pin_input: 
-            st.session_state.auth = pin_input
-            st.rerun()
+    st.title("⛳ Golf Login")
+    pin = st.text_input("Enter Team PIN", type="password")
+    if st.button("Access Scorecard"):
+        # Logic to pull names from your 'Setup' tab goes here
+        st.session_state.auth = pin
+        st.session_state.names = "John, Bill, & Dave" # Replace with sheet lookup
+        st.session_state.start_hole = 4 # Replace with sheet lookup
+        st.rerun()
 else:
-    # --- SCORECARD APP ---
-    st.header(f"Team Scorecard")
-    st.info("Starting Hole: 4") # This will be dynamic from your sheet
-    
-    total_score = 0
+    # --- TEAM HEADER ---
+    st.markdown(f"""
+        <div class="team-header">
+            <h2 style='margin:0;'>Team: {st.session_state.names}</h2>
+            <p style='margin:0; font-size: 18px;'>Starting on <b>Hole {st.session_state.start_hole}</b></p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # --- BIG SCORECARD ---
     scores = {}
-    
-    cols = st.columns(3)
     for i in range(1, 10):
-        with cols[(i-1)%3]:
-            scores[i] = st.number_input(f"Hole {i} (Par {HOLE_PARS[i]})", min_value=1, max_value=10, value=HOLE_PARS[i])
-            total_score += scores[i]
+        # We wrap each hole in a container to give it space
+        with st.container():
+            st.markdown(f"<div class='hole-label'>Hole {i} (Par {HOLE_PARS[i]})</div>", unsafe_allow_html=True)
+            # 'label_visibility' hidden keeps it clean but accessible
+            scores[i] = st.number_input(f"H{i}", min_value=1, max_value=10, value=HOLE_PARS[i], key=f"h{i}", label_visibility="collapsed")
+            st.divider()
+
+    # --- FOOTER ---
+    total = sum(scores.values())
+    par_total = sum(HOLE_PARS.values())
+    diff = total - par_total
     
-    par_diff = total_score - sum(HOLE_PARS.values())
-    color = "red" if par_diff > 0 else "green"
+    st.markdown(f"### Total Score: {total} ({diff:+ if diff != 0 else 'E'})")
     
-    st.divider()
-    st.markdown(f"### Total: {total_score} (<span style='color:{color}'>{par_diff:+}</span>)", unsafe_allow_html=True)
-    
-    if st.button("Submit Final Scores"):
-        st.success("Scores Submitted to Admin!")
-        # Logic to write scores back to the 'Scores' tab goes here
+    if st.button("SUBMIT FINAL SCORE"):
+        st.balloons()
+        st.success("Scores Saved! You can close this page.")
