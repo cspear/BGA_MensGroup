@@ -18,32 +18,37 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 3. LOGIN LOGIC ---
+# Replace your login logic block with this:
 if 'auth' not in st.session_state:
     st.title("⛳ Tournament Login")
     pin_input = st.text_input("Enter your Team PIN", type="password")
     
     if st.button("Start Scoring"):
-        # Fetch your 'Setup' tab
-        df_setup = conn.read(worksheet="Setup")
-        
-        # Look for the PIN in your spreadsheet (ensuring it's treated as a string)
-        match = df_setup[df_setup['PIN'].astype(str) == pin_input]
-        
-        if not match.empty:
-            # PULL ACTUAL NAMES FROM YOUR SHEET
-            # Assuming columns are: P1, P2, P3
-            p1 = match['P1'].iloc[0]
-            p2 = match['P2'].iloc[0]
-            p3 = match['P3'].iloc[0] if 'P3' in match.columns else ""
+        try:
+            # TTL=0 ensures it doesn't show old data if you change the sheet
+            df_setup = conn.read(worksheet="Setup", ttl=0)
             
-            st.session_state.auth = pin_input
-            st.session_state.team_id = match['Team_ID'].iloc[0]
-            st.session_state.names = f"{p1}, {p2} {('& ' + p3) if p3 else ''}"
-            st.session_state.start_hole = match['Start_Hole'].iloc[0]
-            st.rerun()
-        else:
-            st.error("PIN not found. Please see the Admin.")
-
+            # Clean the data: remove empty rows and ensure PIN is a string
+            df_setup = df_setup.dropna(subset=['PIN'])
+            match = df_setup[df_setup['PIN'].astype(str).str.strip() == str(pin_input).strip()]
+            
+            if not match.empty:
+                st.session_state.auth = pin_input
+                st.session_state.team_id = match['Team_ID'].iloc[0]
+                
+                # Check for P1, P2, P3
+                p1 = match['P1'].iloc[0]
+                p2 = match['P2'].iloc[0]
+                p3 = match['P3'].iloc[0] if 'P3' in match.columns and pd.notna(match['P3'].iloc[0]) else ""
+                
+                st.session_state.names = f"{p1} & {p2}" + (f" & {p3}" if p3 else "")
+                st.session_state.start_hole = match['Start_Hole'].iloc[0]
+                st.rerun()
+            else:
+                st.error("PIN not found. Check your 'Setup' tab in the sheet.")
+        except Exception as e:
+            st.error("The app can't reach your Google Sheet.")
+            st.info("Check: Is the tab named 'Setup'? Is 'Anyone with link can view' turned on?")
 # --- 4. THE ACTUAL APP ---
 else:
     st.header(f"Team: {st.session_state.names}")
