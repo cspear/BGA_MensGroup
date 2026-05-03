@@ -27,47 +27,69 @@ st.markdown("""
 # --- 3. LOGIN & DIAGNOSTICS ---
 if 'auth' not in st.session_state:
     st.title("⛳ Tournament Login")
-    pin_input = st.text_input("Enter Team PIN", type="password")
+    # Using a numeric-style input or stripping text to keep it flexible
+    pin_input_raw = st.text_input("Enter Team PIN", type="password").strip()
     
     col1, col2 = st.columns(2)
     
     with col1:
         if st.button("Start Scoring"):
+            if not pin_input_raw:
+                st.warning("Please enter a PIN.")
+                st.stop()
+                
             try:
-                # Standard Login Flow
+                # 1. Fetch the data
                 df_setup = pd.read_csv(SETUP_URL)
                 
-                # Check for Master Admin PIN first
-                if pin_input == ADMIN_PIN:
+                # 2. Check for Master Admin PIN (Exact string match)
+                if pin_input_raw == ADMIN_PIN:
                     st.session_state.auth = "admin"
                     st.rerun()
                 
-                # Check for Team PIN
-                match = df_setup[df_setup['PIN'].astype(str).str.strip() == str(pin_input).strip()]
+                # 3. ROBUST MATCHING LOGIC:
+                # We convert BOTH the sheet column and the user input to numeric strings.
+                # This ignores if the sheet thinks it's 1234, 1234.0, or "1234".
+                def clean_pin(val):
+                    try:
+                        # Convert to float first (to handle 1234.0), then int, then string
+                        return str(int(float(val)))
+                    except:
+                        return str(val).strip()
+
+                df_setup['PIN_CLEAN'] = df_setup['PIN'].apply(clean_pin)
+                user_pin_clean = clean_pin(pin_input_raw)
+                
+                # 4. Search for the match
+                match = df_setup[df_setup['PIN_CLEAN'] == user_pin_clean]
+                
                 if not match.empty:
-                    st.session_state.auth = pin_input
-                    st.session_state.team_id = match['Team_ID'].iloc[0]
-                    p1, p2 = str(match['P1'].iloc[0]), str(match['P2'].iloc[0])
-                    p3 = str(match['P3'].iloc[0]) if 'P3' in match.columns and pd.notna(match['P3'].iloc[0]) else ""
+                    row = match.iloc[0]
+                    st.session_state.auth = user_pin_clean
+                    st.session_state.team_id = row['Team_ID']
+                    
+                    p1 = str(row['P1'])
+                    p2 = str(row['P2'])
+                    p3 = str(row['P3']) if 'P3' in row and pd.notna(row['P3']) else ""
+                    
                     st.session_state.names = f"{p1} & {p2}" + (f" & {p3}" if p3 and p3.lower() != 'nan' else "")
-                    st.session_state.start_hole = match['Start_Hole'].iloc[0]
+                    st.session_state.start_hole = int(row['Start_Hole'])
                     st.rerun()
                 else:
-                    st.error("PIN not found.")
+                    st.error(f"PIN '{pin_input_raw}' not recognized. Try again or see Admin.")
             except Exception as e:
-                st.error("Connection Failed. Use 'Check Connection' for details.")
+                st.error("Error accessing PIN data.")
+                st.write(e)
 
     with col2:
         if st.button("Check Connection"):
-            st.info("Diagnostic Info:")
-            st.code(f"Target URL: {SETUP_URL}")
             try:
                 test_df = pd.read_csv(SETUP_URL)
-                st.success(f"Successfully reached Sheet! Found {len(test_df)} teams.")
-                st.write("First few rows of data:")
-                st.dataframe(test_df.head(3))
+                st.success("Connected!")
+                st.write("Columns found:", list(test_df.columns))
+                st.dataframe(test_df.head(5))
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Connection Error: {e}")
 
 # --- 4. ADMIN DASHBOARD ---
 elif st.session_state.auth == "admin":
