@@ -11,7 +11,6 @@ else:
     st.error("Missing 'gsheet_id' in Streamlit Secrets!")
     st.stop()
 
-# Using the official connection for writing, and CSV for fast reading
 conn = st.connection("gsheets", type=GSheetsConnection)
 SETUP_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Setup"
 
@@ -22,7 +21,7 @@ st.markdown("""
     <style>
     .stNumberInput div div input { font-size: 35px !important; height: 75px !important; }
     .stNumberInput button { width: 80px !important; height: 75px !important; }
-    .team-card { background-color: #f0f2f6; padding: 20px; border-radius: 15px; border-left: 10px solid #007bff; }
+    .team-card { background-color: #f0f2f6; padding: 20px; border-radius: 15px; border-left: 10px solid #007bff; margin-bottom: 20px; }
     .hole-label { font-size: 26px; font-weight: bold; margin-bottom: -15px; margin-top: 15px; }
     </style>
     """, unsafe_allow_html=True)
@@ -55,22 +54,29 @@ if 'auth' not in st.session_state:
                     row = match.iloc[0]
                     st.session_state.auth = user_pin_clean
                     st.session_state.team_id = row['TEAM_ID']
-                    p1, p2 = str(row['P1']), str(row['P2'])
-                    p3 = str(row['P3']) if 'P3' in row and pd.notna(row['P3']) else ""
-                    st.session_state.names = f"{p1} & {p2}" + (f" & {p3}" if p3 and p3.lower() != 'nan' else "")
-                    st.session_state.start_hole = int(row['START_HOLE'])
+                    
+                    # UPDATED TO MATCH YOUR HEADERS: PLAYER_1, PLAYER_2, PLAYER_3
+                    p1 = str(row['PLAYER_1'])
+                    p2 = str(row['PLAYER_2'])
+                    p3 = str(row['PLAYER_3']) if 'PLAYER_3' in row and pd.notna(row['PLAYER_3']) else ""
+                    
+                    st.session_state.names = f"{p1} & {p2}" + (f" & {p3}" if p3 and p3.lower() != 'nan' and p3.strip() != "" else "")
+                    
+                    # UPDATED TO MATCH YOUR HEADER: STARTING_HOLE
+                    st.session_state.start_hole = int(row['STARTING_HOLE'])
                     st.rerun()
                 else:
                     st.error("PIN not recognized.")
             except Exception as e:
-                st.error("Connection Failed. Check your Column Headers in the sheet.")
+                st.error("Login Error. Check the 'Check Connection' list for column name matches.")
+                st.write(e)
 
     with col2:
         if st.button("Check Connection"):
             try:
                 test_df = pd.read_csv(SETUP_URL)
                 st.success("Connected!")
-                st.write("Columns found (Should be ALL CAPS):", list(test_df.columns))
+                st.write("Columns found:", list(test_df.columns))
                 st.dataframe(test_df.head(3))
             except Exception as e:
                 st.error(f"Error: {e}")
