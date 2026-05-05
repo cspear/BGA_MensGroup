@@ -6,7 +6,8 @@ import requests
 SHEET_ID = st.secrets["gsheet_id"]
 ADMIN_PIN = str(st.secrets.get("admin_pin", "9999"))
 # This is the 'POST' version of your form link
-FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScUZ7SratHRVeibtWRg-iFBKHVTt2ueXpwa5WNRXlgkNaOAng/formResponse"
+# Change Line 9 to this:
+FORM_URL = st.secrets["form_url"]
 
 # Public URL for reading setup data
 SETUP_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Setup"
