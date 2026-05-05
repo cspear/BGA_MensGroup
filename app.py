@@ -5,7 +5,7 @@ import requests
 # --- 1. CONFIG & SECRETS ---
 SHEET_ID = st.secrets["gsheet_id"]
 ADMIN_PIN = str(st.secrets.get("admin_pin", "9999"))
-FORM_URL = st.secrets["form_url"]
+FORM_URL = st.secrets["form_url"] # Must end in /formResponse
 SETUP_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Setup"
 
 st.set_page_config(page_title="Golf Scramble", layout="centered")
@@ -27,42 +27,49 @@ if 'step' not in st.session_state:
     st.session_state.step = "login"
 if 'scores' not in st.session_state:
     st.session_state.scores = {i: 4 for i in range(1, 10)}
-if 'visited_holes' not in st.session_state:
-    st.session_state.visited_holes = 0
 
-# --- 4. LOGIN & SHOTGUN START ---
+# --- 4. LOGIN & CONNECTION TEST ---
 if st.session_state.step == "login":
     st.title("⛳ Tournament Login")
     pin_input = st.text_input("Enter Team PIN", type="password").strip()
     
-    if st.button("Start Scoring", use_container_width=True):
-        try:
-            df = pd.read_csv(SETUP_URL)
-            if pin_input == ADMIN_PIN:
-                st.session_state.step = "admin"
-                st.rerun()
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Start Scoring", use_container_width=True):
+            try:
+                df = pd.read_csv(SETUP_URL)
+                if pin_input == ADMIN_PIN:
+                    st.session_state.step = "admin"
+                    st.rerun()
 
-            df['PIN_STR'] = df['PIN'].astype(str).str.replace('.0', '', regex=False).str.strip()
-            match = df[df['PIN_STR'] == pin_input]
-            
-            if not match.empty:
-                row = match.iloc[0]
-                st.session_state.team_id = str(row['TEAM_ID'])
-                st.session_state.names = f"{row['PLAYER_1']} & {row['PLAYER_2']}"
-                # SHOTGUN LOGIC: Set current step to their STARTING_HOLE
-                st.session_state.step = int(row['STARTING_HOLE'])
-                st.session_state.start_hole_const = int(row['STARTING_HOLE'])
-                st.rerun()
-            else:
-                st.error("PIN not recognized.")
-        except:
-            st.error("Connection error.")
+                df['PIN_STR'] = df['PIN'].astype(str).str.replace('.0', '', regex=False).str.strip()
+                match = df[df['PIN_STR'] == pin_input]
+                
+                if not match.empty:
+                    row = match.iloc[0]
+                    st.session_state.team_id = str(row['TEAM_ID'])
+                    st.session_state.names = f"{row['PLAYER_1']} & {row['PLAYER_2']}"
+                    st.session_state.step = int(row['STARTING_HOLE'])
+                    st.session_state.start_hole_const = int(row['STARTING_HOLE'])
+                    st.rerun()
+                else:
+                    st.error("PIN not recognized.")
+            except:
+                st.error("Connection error.")
 
-# --- 5. ONE HOLE PER PAGE (CIRCULAR NAVIGATION) ---
+    with col2:
+        if st.button("Check Connection", use_container_width=True):
+            try:
+                test_df = pd.read_csv(SETUP_URL)
+                st.success("✅ Connected!")
+                st.write("Columns:", list(test_df.columns))
+            except Exception as e:
+                st.error(f"❌ Failed: {e}")
+
+# --- 5. SCORING PAGE ---
 elif isinstance(st.session_state.step, int):
     h = st.session_state.step
     HOLE_PARS = {1:4, 2:3, 3:5, 4:4, 5:3, 6:4, 7:4, 8:4, 9:4}
-    
     st.markdown(f"<div class='player-header'><h3>{st.session_state.names}</h3></div>", unsafe_allow_html=True)
     st.markdown(f"<div class='hole-number'>Hole {h}</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='par-label'>Par {HOLE_PARS[h]}</div>", unsafe_allow_html=True)
@@ -71,31 +78,23 @@ elif isinstance(st.session_state.step, int):
 
     c1, c2 = st.columns(2)
     with c1:
-        # Prev Hole (Wraps 1 to 9)
         if st.button("⬅️ PREV", use_container_width=True):
             st.session_state.step = 9 if h == 1 else h - 1
             st.rerun()
     with c2:
-        # Next Hole (Wraps 9 to 1)
         if st.button("NEXT ➡️", use_container_width=True):
             st.session_state.step = 1 if h == 9 else h + 1
-            st.session_state.visited_holes += 1
             st.rerun()
             
-    # Show "Review" button only after they've had a chance to play a few holes
-    if st.button("GO TO REVIEW PAGE", use_container_width=False):
+    if st.button("GO TO REVIEW PAGE", use_container_width=True):
         st.session_state.step = "review"
         st.rerun()
 
-# --- 6. FULL SUMMARY REVIEW ---
+# --- 6. REVIEW & SUBMIT ---
 elif st.session_state.step == "review":
-    st.title("Review All Scores")
-    st.markdown(f"<div class='player-header'><h3>{st.session_state.names}</h3></div>", unsafe_allow_html=True)
-    
-    # Display scores in a readable vertical list for mobile verification
+    st.title("Review Scores")
     total = sum(st.session_state.scores.values())
     
-    # Summary Grid
     cols = st.columns(3)
     for i in range(1, 10):
         with cols[(i-1)%3]:
@@ -103,27 +102,36 @@ elif st.session_state.step == "review":
             
     st.markdown(f'<div class="team-card"><h4>Tournament Total</h4><h2>{total}</h2></div>', unsafe_allow_html=True)
 
-    if st.button("⬅️ BACK TO SCORING"):
-        st.session_state.step = st.session_state.start_hole_const
+    if st.button("⬅️ BACK TO SCORING", use_container_width=True):
+        st.session_state.step = 1 # Returns to Hole 1
         st.rerun()
 
     if st.button("🏁 FINISH & SUBMIT", type="primary", use_container_width=True):
+        # Using the exact IDs from your pre-filled link
         payload = {
             "entry.355673787": st.session_state.team_id,
+            "entry.570799081": st.session_state.scores[1],
+            "entry.1718629908": st.session_state.scores[2],
+            "entry.1485908234": st.session_state.scores[3],
+            "entry.1352458145": st.session_state.scores[4],
+            "entry.1082590215": st.session_state.scores[5],
+            "entry.1051512403": st.session_state.scores[6],
+            "entry.1802952445": st.session_state.scores[7],
+            "entry.1396264906": st.session_state.scores[8],
+            "entry.2066803273": st.session_state.scores[9],
             "entry.766763420": total
         }
-        for i in range(1, 10):
-            # Map Hole 1 score to entry...581, etc. (using your Form IDs)
-            entry_map = {1:"570799081", 2:"1718629908", 3:"1485908234", 4:"1352458145", 5:"1082590215", 6:"1051512403", 7:"1802952445", 8:"1396264906", 9:"2066803273"}
-            payload[f"entry.{entry_map[i]}"] = st.session_state.scores[i]
         
         try:
-            requests.post(FORM_URL, data=payload)
-            st.balloons()
-            st.session_state.step = "done"
-            st.rerun()
-        except:
-            st.error("Submission failed.")
+            r = requests.post(FORM_URL, data=payload)
+            if r.status_code == 200:
+                st.balloons()
+                st.session_state.step = "done"
+                st.rerun()
+            else:
+                st.error(f"Submission failed. Server responded with: {r.status_code}")
+        except Exception as e:
+            st.error(f"Submission Error: {e}")
 
 elif st.session_state.step == "done":
     st.title("⛳ Success!")
