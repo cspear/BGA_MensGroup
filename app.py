@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+import time
 
 # --- 1. CONFIG & SECRETS ---
 SHEET_ID = st.secrets["gsheet_id"]
@@ -10,7 +11,7 @@ SETUP_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:
 
 st.set_page_config(page_title="Golf Scramble", layout="centered")
 
-# --- 2. UI STYLING (KEEPING YOUR EXACT LOOK) ---
+# --- 2. UI STYLING (MATCHING YOUR SCREENSHOTS) ---
 st.markdown("""
     <style>
     .stButton > button { width: 100% !important; font-size: 20px !important; height: 60px !important; border-radius: 10px !important; }
@@ -37,8 +38,16 @@ if st.session_state.step == "login":
     c1, c2 = st.columns(2)
     with c1:
         if st.button("Start Scoring", use_container_width=True):
-            try:
-                df = pd.read_csv(SETUP_URL)
+            # Try to connect up to 2 times to prevent the "Connection Error" on wake-up
+            df = None
+            for _ in range(2):
+                try:
+                    df = pd.read_csv(SETUP_URL)
+                    break
+                except:
+                    time.sleep(1)
+            
+            if df is not None:
                 if pin_input == ADMIN_PIN:
                     st.session_state.step = "admin"
                     st.rerun()
@@ -53,8 +62,9 @@ if st.session_state.step == "login":
                     st.rerun()
                 else:
                     st.error("PIN not recognized.")
-            except:
-                st.error("Connection error.")
+            else:
+                st.error("Connection error. Try one more time.")
+
     with c2:
         if st.button("Test Connection", use_container_width=True):
             try:
@@ -127,14 +137,21 @@ elif st.session_state.step == "review":
             "entry.2066803273": str(st.session_state.scores[9]),
             "entry.766763420": str(total)
         }
+        
+        # Headers help avoid the 401 by pretending to be a browser
+        user_agent = {'User-Agent': 'Mozilla/5.0'}
+        
         try:
-            r = requests.post(FORM_URL, data=payload)
+            r = requests.post(FORM_URL, data=payload, headers=user_agent)
             if r.status_code == 200:
                 st.balloons()
                 st.session_state.step = "done"
                 st.rerun()
             else:
-                st.error(f"Error {r.status_code}. Response: {r.text[:100]}")
+                # If we get a 401, this text will show what Google actually said
+                st.error(f"Error {r.status_code}. Google is requesting a login.")
+                if "Ma" in r.text: # Logic to catch the CSS snippet you saw
+                    st.info("Tip: Double-check that 'Restrict to users in Organization' is OFF in Form Settings.")
         except Exception as e:
             st.error(f"Failed: {e}")
 
