@@ -3,10 +3,9 @@ import pandas as pd
 import requests
 
 # --- 1. CONFIG & SECRETS ---
+# We pull everything from Secrets for a clean handoff
 SHEET_ID = st.secrets["gsheet_id"]
 ADMIN_PIN = str(st.secrets.get("admin_pin", "9999"))
-# This is the 'POST' version of your form link
-# Change Line 9 to this:
 FORM_URL = st.secrets["form_url"]
 
 # Public URL for reading setup data
@@ -31,34 +30,48 @@ if 'step' not in st.session_state:
 if 'scores' not in st.session_state:
     st.session_state.scores = {1:4, 2:3, 3:5, 4:4, 5:3, 6:4, 7:4, 8:4, 9:4}
 
-# --- 4. LOGIN ---
+# --- 4. LOGIN & DIAGNOSTICS ---
 if st.session_state.step == "login":
     st.title("⛳ Tournament Login")
     pin_input = st.text_input("Enter Team PIN", type="password").strip()
     
-    if st.button("Start Scoring", use_container_width=True):
-        try:
-            df = pd.read_csv(SETUP_URL)
-            # Master Admin check
-            if pin_input == ADMIN_PIN:
-                st.session_state.step = "admin"
-                st.rerun()
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Start Scoring", use_container_width=True):
+            try:
+                df = pd.read_csv(SETUP_URL)
+                # Master Admin check
+                if pin_input == ADMIN_PIN:
+                    st.session_state.step = "admin"
+                    st.rerun()
 
-            # PIN Match logic
-            df['PIN_STR'] = df['PIN'].astype(str).str.replace('.0', '', regex=False).str.strip()
-            match = df[df['PIN_STR'] == pin_input]
-            
-            if not match.empty:
-                row = match.iloc[0]
-                st.session_state.team_id = str(row['TEAM_ID'])
-                p1, p2 = str(row['PLAYER_1']), str(row['PLAYER_2'])
-                st.session_state.names = f"{p1} & {p2}"
-                st.session_state.step = 1
-                st.rerun()
-            else:
-                st.error("PIN not found.")
-        except:
-            st.error("Could not connect to Spreadsheet. Check Sharing settings.")
+                # Clean PIN logic
+                df['PIN_STR'] = df['PIN'].astype(str).str.replace('.0', '', regex=False).str.strip()
+                match = df[df['PIN_STR'] == pin_input]
+                
+                if not match.empty:
+                    row = match.iloc[0]
+                    st.session_state.team_id = str(row['TEAM_ID'])
+                    p1, p2 = str(row['PLAYER_1']), str(row['PLAYER_2'])
+                    st.session_state.names = f"{p1} & {p2}"
+                    st.session_state.step = 1
+                    st.rerun()
+                else:
+                    st.error("PIN not found.")
+            except Exception as e:
+                st.error("Could not reach Spreadsheet.")
+
+    with col2:
+        # --- THE CONNECTION CHECK IS BACK ---
+        if st.button("Check Connection", use_container_width=True):
+            try:
+                test_df = pd.read_csv(SETUP_URL)
+                st.success("✅ Connected to Sheet!")
+                st.write("Found Columns:", list(test_df.columns))
+                st.write("First Team:", test_df['PLAYER_1'].iloc[0])
+            except Exception as e:
+                st.error(f"❌ Connection Failed: {e}")
 
 # --- 5. ONE HOLE PER PAGE ---
 elif isinstance(st.session_state.step, int):
@@ -111,7 +124,7 @@ elif st.session_state.step == "review":
             st.success("Successfully Submitted!")
             st.session_state.step = "done"
         except:
-            st.error("Submission failed. Check your internet connection.")
+            st.error("Submission failed.")
 
 elif st.session_state.step == "done":
     st.title("⛳ Round Complete!")
