@@ -128,14 +128,14 @@ elif st.session_state.step == "review":
             "entry.355673787": str(st.session_state.team_id),
             "entry.570799081": str(st.session_state.scores[1]),
             "entry.1718629908": str(st.session_state.scores[2]),
-            "entry.1485908234": str(st.session_state.scores[3]),
-            "entry.1352458145": str(st.session_state.scores[4]),
-            "entry.1082590215": str(st.session_state.scores[5]),
-            "entry.1051512403": str(st.session_state.scores[6]),
-            "entry.1802952445": str(st.session_state.scores[7]),
-            "entry.1396264906": str(st.session_state.scores[8]),
-            "entry.2066803273": str(st.session_state.scores[9]),
-            "entry.766763420": str(total)
+            "entry.968730129": str(st.session_state.scores[3]),
+            "entry.692766055": str(st.session_state.scores[4]),
+            "entry.272909014": str(st.session_state.scores[5]),
+            "entry.784690913": str(st.session_state.scores[6]),
+            "entry.561988802": str(st.session_state.scores[7]),
+            "entry.1470075964": str(st.session_state.scores[8]),
+            "entry.800236866": str(st.session_state.scores[9]),
+            "entry.225613032": str(total)
         }
         
         # Headers help avoid the 401 by pretending to be a browser
