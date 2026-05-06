@@ -27,7 +27,6 @@ def load_sheet(url):
     df.columns = [str(c).strip().upper() for c in df.columns]
     return df
 
-# CACHED connection check prevents the app from freezing
 @st.cache_data(ttl=60)
 def check_db():
     try: return requests.get(MASTER_URL, timeout=2).status_code == 200
@@ -53,17 +52,26 @@ if st.session_state.step == "admin":
         s_df = s_df.sort_values(by='HOLE_SORT')
 
         for idx, row in s_df.iterrows():
-            p3 = f", {row['PLAYER_3']}" if row['PLAYER_3'] else ""
-            st.write(f"**Team:** {row['PLAYER_1']}, {row['PLAYER_2']}{p3}")
+            # Check if Player 3 exists for pricing
+            has_p3 = bool(str(row['PLAYER_3']).strip())
+            p3_text = f", {row['PLAYER_3']}" if has_p3 else ""
+            amount_due = "$15" if has_p3 else "$10"
+            
+            st.write(f"**Team:** {row['PLAYER_1']}, {row['PLAYER_2']}{p3_text}")
             
             c1, c2, c3 = st.columns([2, 2, 1])
             
+            # Paid Status Toggle
             current_paid = str(row['PAID']).upper() == "TRUE"
-            if c1.button(f"{'✅ PAID' if current_paid else '❌ UNPAID'}", key=f"pay_{idx}"):
+            btn_text = "✅ PAID" if current_paid else f"❌ UNPAID ({amount_due})"
+            
+            if c1.button(btn_text, key=f"pay_{idx}"):
                 new_status = "FALSE" if current_paid else "TRUE"
                 requests.get(ENTRY_SCRIPT, params={"ACTION": "UPDATE_TEAM", "PHONE": row['TEAM_ID'], "PAID": new_status})
+                load_sheet.clear() # Dump cache to show new status instantly
                 st.rerun()
 
+            # Hole Selection
             hole_options = ["", "1", "2", "2A", "3", "4", "5", "5A", "6", "7", "7A", "8", "9"]
             current_hole = str(row['STARTING_HOLE']).replace(".0", "")
             try: h_idx = hole_options.index(current_hole)
@@ -72,6 +80,7 @@ if st.session_state.step == "admin":
             new_hole = c2.selectbox("Hole", hole_options, index=h_idx, key=f"hole_{idx}")
             if new_hole != current_hole:
                 requests.get(ENTRY_SCRIPT, params={"ACTION": "UPDATE_TEAM", "PHONE": row['TEAM_ID'], "HOLE": new_hole})
+                load_sheet.clear() # Dump cache to show new hole instantly
                 st.rerun()
             
             st.markdown("<div class='section-break'></div>", unsafe_allow_html=True)
@@ -102,7 +111,6 @@ elif st.session_state.step == "register_team":
 
 # --- LOGIN ---
 elif st.session_state.step == "login":
-    # Small native Streamlit dot
     dot_color = "green" if check_db() else "red"
     st.markdown(f"## ⛳ Scramble Login :{dot_color}[●]")
     
@@ -135,8 +143,16 @@ elif st.session_state.step == "verify_entry":
     
     if current_entry.empty:
         if st.button("ENTER THIS WEEK'S TOURNAMENT"):
-            params = {"PHONE": t['PHONE'], "P1": t['PLAYER_1'], "P2": t['PLAYER_2'], "P3": t.get('PLAYER_3', '')}
+            # The PIN is now passed via the payload
+            params = {
+                "PHONE": t['PHONE'], 
+                "PIN": t['PASSWORD'], 
+                "P1": t['PLAYER_1'], 
+                "P2": t['PLAYER_2'], 
+                "P3": t.get('PLAYER_3', '')
+            }
             requests.get(ENTRY_SCRIPT, params=params)
+            load_sheet.clear()
             st.rerun()
     else:
         is_paid = str(current_entry.iloc[0].get('PAID', 'FALSE')).upper() == 'TRUE'
@@ -146,4 +162,6 @@ elif st.session_state.step == "verify_entry":
             if st.button("START SCORING"): nav_to(1)
         else:
             st.warning("⏳ Status: UNPAID. See Admin to pay and get a hole number.")
-            if st.button("Refresh"): st.rerun()
+            if st.button("Refresh"): 
+                load_sheet.clear()
+                st.rerun()
