@@ -1,12 +1,14 @@
 import streamlit as st
 import pandas as pd
 import requests
+import time
 
 # --- 1. CONFIG ---
 SHEET_ID = st.secrets["gsheet_id"]
 ADMIN_PIN = str(st.secrets["admin_pin"])
 ENTRY_SCRIPT = st.secrets["entry_script_url"]
 
+# Base URLs
 MASTER_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Master_Teams"
 SETUP_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Setup"
 
@@ -20,10 +22,12 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. DATA HELPERS ---
+# --- 3. DATA HELPERS (With Cache Busting) ---
 @st.cache_data(ttl=2)
-def load_sheet(url):
-    df = pd.read_csv(url).fillna("")
+def load_sheet(base_url):
+    # Appending a timestamp bypasses Google's internal CSV cache delay
+    fetch_url = f"{base_url}&_={int(time.time())}"
+    df = pd.read_csv(fetch_url).fillna("")
     df.columns = [str(c).strip().upper() for c in df.columns]
     return df
 
@@ -32,7 +36,17 @@ def check_db():
     try: return requests.get(MASTER_URL, timeout=2).status_code == 200
     except: return False
 
-# --- 4. APP LOGIC ---
+# --- 4. CALLBACK FUNCTIONS (Fixes the looping) ---
+def toggle_paid(phone, current_paid):
+    new_status = "FALSE" if current_paid else "TRUE"
+    requests.get(ENTRY_SCRIPT, params={"ACTION": "UPDATE_TEAM", "PHONE": phone, "PAID": new_status})
+    load_sheet.clear() # Dump cache so next render sees the truth
+
+def update_hole(phone, new_hole):
+    requests.get(ENTRY_SCRIPT, params={"ACTION": "UPDATE_TEAM", "PHONE": phone, "HOLE": new_hole})
+    load_sheet.clear()
+
+# --- 5. APP LOGIC ---
 if 'step' not in st.session_state: st.session_state.step = "login"
 if 'team_data' not in st.session_state: st.session_state.team_data = None
 
@@ -52,7 +66,6 @@ if st.session_state.step == "admin":
         s_df = s_df.sort_values(by='HOLE_SORT')
 
         for idx, row in s_df.iterrows():
-            # Check if Player 3 exists for pricing
             has_p3 = bool(str(row['PLAYER_3']).strip())
             p3_text = f", {row['PLAYER_3']}" if has_p3 else ""
             amount_due = "$15" if has_p3 else "$10"
@@ -61,26 +74,34 @@ if st.session_state.step == "admin":
             
             c1, c2, c3 = st.columns([2, 2, 1])
             
-            # Paid Status Toggle
+            # --- PAID CALLBACK BUTTON ---
             current_paid = str(row['PAID']).upper() == "TRUE"
             btn_text = "✅ PAID" if current_paid else f"❌ UNPAID ({amount_due})"
             
-            if c1.button(btn_text, key=f"pay_{idx}"):
-                new_status = "FALSE" if current_paid else "TRUE"
-                requests.get(ENTRY_SCRIPT, params={"ACTION": "UPDATE_TEAM", "PHONE": row['TEAM_ID'], "PAID": new_status})
-                load_sheet.clear() # Dump cache to show new status instantly
-                st.rerun()
+            c1.button(
+                btn_text, 
+                key=f"pay_{idx}", 
+                on_click=toggle_paid, 
+                args=(row['TEAM_ID'], current_paid)
+            )
 
-            # Hole Selection
+            # --- HOLE CALLBACK SELECTBOX ---
             hole_options = ["", "1", "2", "2A", "3", "4", "5", "5A", "6", "7", "7A", "8", "9"]
             current_hole = str(row['STARTING_HOLE']).replace(".0", "")
             try: h_idx = hole_options.index(current_hole)
             except: h_idx = 0
                 
-            new_hole = c2.selectbox("Hole", hole_options, index=h_idx, key=f"hole_{idx}")
-            if new_hole != current_hole:
-                requests.get(ENTRY_SCRIPT, params={"ACTION": "UPDATE_TEAM", "PHONE": row['TEAM_ID'], "HOLE": new_hole})
-                load_sheet.clear() # Dump cache to show new hole instantly
+            # By tracking the selected value in session state, we avoid rerun loops
+            selected_hole = c2.selectbox(
+                "Hole", 
+                hole_options, 
+                index=h_idx, 
+                key=f"hole_{idx}"
+            )
+            
+            # Only trigger update if it actually changed
+            if selected_hole != current_hole:
+                update_hole(row['TEAM_ID'], selected_hole)
                 st.rerun()
             
             st.markdown("<div class='section-break'></div>", unsafe_allow_html=True)
@@ -143,7 +164,6 @@ elif st.session_state.step == "verify_entry":
     
     if current_entry.empty:
         if st.button("ENTER THIS WEEK'S TOURNAMENT"):
-            # The PIN is now passed via the payload
             params = {
                 "PHONE": t['PHONE'], 
                 "PIN": t['PASSWORD'], 
