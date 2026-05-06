@@ -2,30 +2,34 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
+import re
 
 # --- 1. CONFIG ---
 SHEET_ID = st.secrets["gsheet_id"]
 ADMIN_PIN = str(st.secrets["admin_pin"])
 ENTRY_SCRIPT = st.secrets["entry_script_url"]
 
-# Base URLs
 MASTER_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Master_Teams"
 SETUP_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Setup"
 
 st.set_page_config(page_title="Golf Scramble Pro", layout="wide")
 
-# --- 2. STYLING ---
+# --- 2. STYLING (Ultra-Compact) ---
 st.markdown("""
     <style>
-    .section-break { border-bottom: 3px solid #444; margin: 10px 0; }
-    .stButton > button { width: 100%; }
+    /* Compact the buttons and dropdowns */
+    .stButton > button { width: 100%; padding: 0px !important; height: 35px !important; }
+    div[data-baseweb="select"] > div { height: 35px !important; min-height: 35px !important; }
+    /* Dark line break for hole groups */
+    .group-break { border-bottom: 3px solid #222; margin: 12px 0px; }
+    /* Tighten vertical spacing between rows */
+    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. DATA HELPERS (With Cache Busting) ---
+# --- 3. DATA HELPERS & SORTING ---
 @st.cache_data(ttl=2)
 def load_sheet(base_url):
-    # Appending a timestamp bypasses Google's internal CSV cache delay
     fetch_url = f"{base_url}&_={int(time.time())}"
     df = pd.read_csv(fetch_url).fillna("")
     df.columns = [str(c).strip().upper() for c in df.columns]
@@ -36,11 +40,18 @@ def check_db():
     try: return requests.get(MASTER_URL, timeout=2).status_code == 200
     except: return False
 
-# --- 4. CALLBACK FUNCTIONS (Fixes the looping) ---
+# Natural sorting for Hole numbers (1, 2, 2A, 3...)
+def natural_hole_sort(h):
+    h_str = str(h).upper().strip().replace(".0", "")
+    match = re.match(r"(\d+)([A-Z]*)", h_str)
+    if match: return (int(match.group(1)), match.group(2))
+    return (999, h_str) # Puts unassigned/blanks at the bottom
+
+# --- 4. CALLBACK FUNCTIONS ---
 def toggle_paid(phone, current_paid):
     new_status = "FALSE" if current_paid else "TRUE"
     requests.get(ENTRY_SCRIPT, params={"ACTION": "UPDATE_TEAM", "PHONE": phone, "PAID": new_status})
-    load_sheet.clear() # Dump cache so next render sees the truth
+    load_sheet.clear()
 
 def update_hole(phone, new_hole):
     requests.get(ENTRY_SCRIPT, params={"ACTION": "UPDATE_TEAM", "PHONE": phone, "HOLE": new_hole})
@@ -58,53 +69,49 @@ def nav_to(step):
 if st.session_state.step == "admin":
     st.title("🛠 Admin Command Center")
     tab1, tab2, tab3, tab4 = st.tabs(["💰 CASHIER", "🚀 STARTER", "📊 LEADERBOARD", "⚙️ RESET"])
+    
     s_df = load_sheet(SETUP_URL)
     
     with tab1:
-        st.subheader("Tournament Check-In")
-        s_df['HOLE_SORT'] = s_df['STARTING_HOLE'].astype(str)
-        s_df = s_df.sort_values(by='HOLE_SORT')
+        # Clean and sort holes natively
+        s_df['CLEAN_HOLE'] = s_df['STARTING_HOLE'].apply(lambda x: str(x).upper().strip().replace(".0", ""))
+        s_df['SORT_KEY'] = s_df['CLEAN_HOLE'].apply(natural_hole_sort)
+        s_df = s_df.sort_values(by='SORT_KEY')
 
+        st.markdown("**Team Names &nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp; Payment &nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp; Hole Assignment**")
+        
+        last_hole = None
         for idx, row in s_df.iterrows():
+            current_hole_val = row['CLEAN_HOLE']
+            
+            # Insert dark line ONLY when the hole group changes (skip the very first line)
+            if last_hole is not None and current_hole_val != last_hole:
+                st.markdown("<div class='group-break'></div>", unsafe_allow_html=True)
+            last_hole = current_hole_val
+
             has_p3 = bool(str(row['PLAYER_3']).strip())
             p3_text = f", {row['PLAYER_3']}" if has_p3 else ""
+            team_str = f"{row['PLAYER_1']}, {row['PLAYER_2']}{p3_text}"
             amount_due = "$15" if has_p3 else "$10"
-            
-            st.write(f"**Team:** {row['PLAYER_1']}, {row['PLAYER_2']}{p3_text}")
-            
-            c1, c2, c3 = st.columns([2, 2, 1])
-            
-            # --- PAID CALLBACK BUTTON ---
             current_paid = str(row['PAID']).upper() == "TRUE"
-            btn_text = "✅ PAID" if current_paid else f"❌ UNPAID ({amount_due})"
             
-            c1.button(
-                btn_text, 
-                key=f"pay_{idx}", 
-                on_click=toggle_paid, 
-                args=(row['TEAM_ID'], current_paid)
-            )
+            # Single-line columns: [Names (50%), Paid (25%), Hole (25%)]
+            c1, c2, c3 = st.columns([4, 2, 2])
+            
+            c1.markdown(f"<div style='margin-top: 5px; font-size: 15px;'><b>{team_str}</b></div>", unsafe_allow_html=True)
+            
+            btn_text = "✅ PAID" if current_paid else f"❌ ({amount_due})"
+            c2.button(btn_text, key=f"pay_{idx}", on_click=toggle_paid, args=(row['TEAM_ID'], current_paid))
 
-            # --- HOLE CALLBACK SELECTBOX ---
             hole_options = ["", "1", "2", "2A", "3", "4", "5", "5A", "6", "7", "7A", "8", "9"]
-            current_hole = str(row['STARTING_HOLE']).replace(".0", "")
-            try: h_idx = hole_options.index(current_hole)
+            try: h_idx = hole_options.index(current_hole_val)
             except: h_idx = 0
                 
-            # By tracking the selected value in session state, we avoid rerun loops
-            selected_hole = c2.selectbox(
-                "Hole", 
-                hole_options, 
-                index=h_idx, 
-                key=f"hole_{idx}"
-            )
-            
-            # Only trigger update if it actually changed
-            if selected_hole != current_hole:
+            # label_visibility="collapsed" hides the word "Hole" to save space
+            selected_hole = c3.selectbox("Hole", hole_options, index=h_idx, key=f"h_{idx}", label_visibility="collapsed")
+            if selected_hole != current_hole_val:
                 update_hole(row['TEAM_ID'], selected_hole)
                 st.rerun()
-            
-            st.markdown("<div class='section-break'></div>", unsafe_allow_html=True)
 
     if st.button("LOGOUT"): nav_to("login")
 
@@ -165,11 +172,8 @@ elif st.session_state.step == "verify_entry":
     if current_entry.empty:
         if st.button("ENTER THIS WEEK'S TOURNAMENT"):
             params = {
-                "PHONE": t['PHONE'], 
-                "PIN": t['PASSWORD'], 
-                "P1": t['PLAYER_1'], 
-                "P2": t['PLAYER_2'], 
-                "P3": t.get('PLAYER_3', '')
+                "PHONE": t['PHONE'], "PIN": t['PASSWORD'], 
+                "P1": t['PLAYER_1'], "P2": t['PLAYER_2'], "P3": t.get('PLAYER_3', '')
             }
             requests.get(ENTRY_SCRIPT, params=params)
             load_sheet.clear()
